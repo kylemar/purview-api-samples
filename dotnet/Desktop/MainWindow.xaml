@@ -1,0 +1,117 @@
+<!--
+   Copyright (c) Microsoft Corporation.
+   Licensed under the MIT License.    
+-->
+
+<Window x:Class="PurviewAPIExp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:PurviewAPIExp"
+        mc:Ignorable="d"
+        Title="Purview API Explorer" Height="1000" Width="1800">
+    <Grid>
+        <StackPanel Margin="10">
+            <Border BorderBrush="DimGray" BorderThickness="1" Padding="5" Margin="5">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="500" />
+                            <ColumnDefinition Width="400" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,5,0">
+                            <TextBlock Text="Purview API:" Margin="0,0,0,5" FontSize="20"/>
+                            <ComboBox Name="ApiSelectBox" SelectionChanged="ApiSelectBox_SelectionChanged" Margin="0,0,0,10" FontSize="20"  IsEnabled="False">
+                                <ComboBoxItem Content="Protection Scopes - Initial Call" IsSelected ="True"/>
+                                <ComboBoxItem Content="Process Content - Start Conversation"/>
+                                <ComboBoxItem Content="Process Content - Continue Conversation with Response"/>
+                                <ComboBoxItem Content="Process Content - Continue Conversation with Prompt"/>
+                                <ComboBoxItem Content="Content Activity"/>
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,5,0">
+                            <TextBlock Text="Permission:" Margin="0,0,0,5" FontSize="20"/>
+                            <TextBox Name="Scope" FontSize="20" Height="32"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Margin="0,20,5,0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <ComboBox Name="GraphVersionSelectBox" SelectionChanged="GraphVersionSelectBox_SelectionChanged" Margin="10,0,10,0" FontSize="20" Height="35"  Width="100">
+                                    <ComboBoxItem Content="Beta" IsSelected ="True"/>
+                                    <ComboBoxItem Content="1.0" IsEnabled="False"/>
+                                </ComboBox>
+                                <Button x:Name="SignInBtn"  Content="Sign In" Click="SignInBtn_Click" Margin="10,0,10,0" Width="136"  FontSize="20"/>
+                                <Button x:Name="ClearTokenCache"  Content="Clear Tokens" Click="ClearTokenCache_Click" Margin="10,0,10,0" Width="136"  FontSize="20" IsEnabled="True"/>
+                                <StackPanel Orientation="Vertical">
+                                    <CheckBox x:Name="UseBroker" Content="Use Broker" Margin="5,0,5,0" FontSize="20" IsChecked="True" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+
+                    </Grid>
+                </StackPanel>
+            </Border>
+            <Border BorderBrush="DimGray" BorderThickness="1" Padding="5" Margin="5">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10" >
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="80" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,5,0">
+                            <TextBlock Text="Request URL:" Margin="0,0,0,5" FontSize="20"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,5,0">
+                            <TextBox Name="UrlTextBox" FontSize="20"/>
+                        </StackPanel>
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <StackPanel Orientation="Vertical">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Request" Margin="0,0,5,0" FontSize="20"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <Button x:Name="SendBtn"  Content="Send Request" Click="SendRequestButton_Click" Margin="10,0,10,0" Width="236"  FontSize="20" IsEnabled="False"/>
+                                    <Button x:Name="NewRequestBtn"  Content="New Request" Click="NewRequestBtn_Click" Margin="10,0,10,0" Width="236"  FontSize="20" IsEnabled="False"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <TabControl Name="RequestContentTabControl" Margin="5" FontSize="20" Width="710" Height="570">
+                                <TabItem Header="Request Body" Name="SimpleBodyTab" IsSelected="true">
+                                    <StackPanel>
+                                        <TextBox Name="RequestBodyTextBox" Height="540" Margin="0,0,0,10" TextWrapping="Wrap" AcceptsReturn="True" FontSize="20"/>
+                                    </StackPanel>
+                                </TabItem>
+                                <TabItem Header="Request Headers" Name="RequestHeaders">
+                                    <StackPanel>
+                                        <TextBox Name="RequestHeadersTextBox" Height="540" Margin="0,0,0,10" TextWrapping="Wrap" AcceptsReturn="True" FontSize="20"/>
+                                    </StackPanel>
+                                </TabItem>
+                            </TabControl>
+                        </StackPanel>
+                        <StackPanel>
+                            <TabControl Name="Response" Margin="5" FontSize="20" Width="700" Height="600">
+                                <TabItem Header="Response Content" IsSelected="true">
+                                    <StackPanel>
+                                        <TextBox Name="ResponseTextBox" Height="560" Margin="0,0,0,10" TextWrapping="Wrap" IsReadOnly="True" FontSize="20"/>
+                                    </StackPanel>
+                                </TabItem>
+                                <TabItem Header="Response Headers">
+                                    <StackPanel>
+                                        <TextBox Name="ResponseHeadersTextBox" Height="560" Margin="0,0,0,10" TextWrapping="Wrap" IsReadOnly="True" FontSize="20"/>
+                                    </StackPanel>
+                                </TabItem>
+                                <TabItem Header="Log" >
+                                    <StackPanel>
+                                        <TextBox x:Name="LogTextBox" Height="300" Margin="0,0,0,10" TextWrapping="NoWrap" ScrollViewer.VerticalScrollBarVisibility="Visible"  ScrollViewer.HorizontalScrollBarVisibility="Visible"  FontSize="20"/>
+                                    </StackPanel>
+                                </TabItem>
+                            </TabControl>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <TextBlock x:Name="StatusBox" Text="Status" VerticalAlignment="Bottom" FontSize="20"/>
+        </StackPanel>
+    </Grid>
+</Window>
