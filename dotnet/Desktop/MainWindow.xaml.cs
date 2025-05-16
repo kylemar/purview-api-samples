@@ -90,7 +90,7 @@ namespace PurviewAPIExp
         /// All the permissions the app needs. Listed together for a single consent prompt on first sign in
         /// as opposed incrementally adding consent with multiple prompts as the user explores APIs
         /// </summary>
-        private string[] signInScopes = new string[] { "user.read", "Content.Process.User", "ProtectionScopes.Compute.User", "ContentActivity.Write", "SensitivityLabel.Read" };
+        private string[] signInScopes = new string[] { "user.read", "Content.Process.User", "ProtectionScopes.Compute.User", "ContentActivity.Write" };
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MainWindow"/> class.
@@ -194,29 +194,14 @@ namespace PurviewAPIExp
 
             if (selectedItem != null && selectedItem.Content != null)
             {
-                if (API != null && API.StartsWith("Process Content") )
-                {
-                    if (isOffline)
-                    {
-                        responseDict["StatusCode"] = $"StatusCode: {(int)response.StatusCode} - {response.ReasonPhrase} for offline processing.";
-                    }
-                    else
-                    {
-                        responseDict["StatusCode"] = $"StatusCode: {(int)response.StatusCode} - {response.ReasonPhrase}";
-                    }
-                }
-                else if (API != null && API.StartsWith("Protection Scopes"))
+                responseDict["StatusCode"] = $"StatusCode: {(int)response.StatusCode} - {response.ReasonPhrase}";
+                if (API != null && API.StartsWith("Protection Scopes"))
                 {
                     isOffline = true;
                     if (responseContent != null && responseContent.Contains("evaluateInline"))
                     {
                         isOffline = false;
                     }
-                    responseDict["StatusCode"] = $"StatusCode: {(int)response.StatusCode} - {response.ReasonPhrase}";
-                }
-                else
-                {
-                    responseDict["StatusCode"] = $"StatusCode: {(int)response.StatusCode} - {response.ReasonPhrase}";
                 }
             }
 
@@ -437,7 +422,6 @@ namespace PurviewAPIExp
                     case "Protection Scopes - Initial Call":
                         httpOperation = "POST";
                         UrlTextBox.Text = this.userPsUrl;
-                        Scope.Text = "https://canary.graph.microsoft.com/ProtectionScopes.Compute.User";
                         Scope.Text = "ProtectionScopes.Compute.User";
                         RequestContentTabControl.SelectedIndex = 0;
                         RequestBodyTextBox.Text =
@@ -596,11 +580,6 @@ namespace PurviewAPIExp
 
                     case "1.0":
                         this.baseUrl = "https://graph.microsoft.com/v1.0";
-                        this.SetUpApiUrls();
-                        break;
-
-                    case "Canary":
-                        this.baseUrl = "https://canary.graph.microsoft.com/testprodbetadcsdogfood";
                         this.SetUpApiUrls();
                         break;
                 }
