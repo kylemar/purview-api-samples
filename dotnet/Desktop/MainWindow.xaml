@@ -29,6 +29,8 @@
                                 <ComboBoxItem Content="Process Content - Continue Conversation with Response"/>
                                 <ComboBoxItem Content="Process Content - Continue Conversation with Prompt"/>
                                 <ComboBoxItem Content="Content Activity"/>
+                                <ComboBoxItem Content="Labels Retrieval"/>
+                                <ComboBoxItem Content="Label Retrieval For Given Label Id"/>
                             </ComboBox>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="0,0,5,0">
@@ -45,8 +47,9 @@
                                 <Button x:Name="SignInBtn"  Content="Sign In" Click="SignInBtn_Click" Margin="10,0,10,0" Width="136"  FontSize="20"/>
                                 <Button x:Name="ClearTokenCache"  Content="Clear Tokens" Click="ClearTokenCache_Click" Margin="10,0,10,0" Width="136"  FontSize="20" IsEnabled="True"/>
                                 <StackPanel Orientation="Vertical">
-                                    <CheckBox x:Name="UseBroker" Content="Use Broker" Margin="5,0,5,0" FontSize="20" IsChecked="True" />
+                                   <CheckBox x:Name="UseBroker" Content="Use Broker" Margin="5,0,5,0" FontSize="20" IsChecked="True" />
                                 </StackPanel>
+                                <TextBlock x:Name="userName"  Text="Please sign in ..." Margin="20,0,0,5" FontSize="20"/>
                             </StackPanel>
                         </StackPanel>
 
@@ -70,7 +73,7 @@
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <StackPanel Orientation="Vertical">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Request" Margin="0,0,5,0" FontSize="20"/>
+                            <TextBlock Text="Request" Margin="0,0,5,0" FontSize="20"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                     <Button x:Name="SendBtn"  Content="Send Request" Click="SendRequestButton_Click" Margin="10,0,10,0" Width="236"  FontSize="20" IsEnabled="False"/>
                                     <Button x:Name="NewRequestBtn"  Content="New Request" Click="NewRequestBtn_Click" Margin="10,0,10,0" Width="236"  FontSize="20" IsEnabled="False"/>
@@ -108,7 +111,10 @@
                                 </TabItem>
                             </TabControl>
                         </StackPanel>
+
                     </StackPanel>
+
+
                 </StackPanel>
             </Border>
             <TextBlock x:Name="StatusBox" Text="Status" VerticalAlignment="Bottom" FontSize="20"/>
