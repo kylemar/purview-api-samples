@@ -24,6 +24,7 @@ namespace PurviewAPIExp
         private const string UserPsUrlFormat = "{0}/me/dataSecurityAndGovernance/protectionScopes/compute";
         private const string PcUrlFormat = "{0}/me/dataSecurityAndGovernance/processContent";
         private const string ActivityUploadFormat = "{0}/me/dataSecurityAndGovernance/activities/contentActivities";
+        private const string SensitivityLabelsFormat = "{0}/security/dataSecurityAndGovernance/sensitivityLabels";
 
         /// <summary>
         /// Cache the ProtectionScopes ID
@@ -78,6 +79,7 @@ namespace PurviewAPIExp
         private string userPsUrl = string.Empty;
         private string pcUrl = string.Empty;
         private string activityUrl = string.Empty;
+        private string sensitivityLabelsUrl = string.Empty;
         private string baseUrl = "https://graph.microsoft.com/beta";
 
         /// <summary>
@@ -90,7 +92,7 @@ namespace PurviewAPIExp
         /// All the permissions the app needs. Listed together for a single consent prompt on first sign in
         /// as opposed incrementally adding consent with multiple prompts as the user explores APIs
         /// </summary>
-        private string[] signInScopes = new string[] { "user.read", "Content.Process.User", "ProtectionScopes.Compute.User", "ContentActivity.Write" };
+        private string[] signInScopes = new string[] { "user.read", "Content.Process.User", "ProtectionScopes.Compute.User", "ContentActivity.Write", "SensitivityLabel.Read" };
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MainWindow"/> class.
@@ -153,6 +155,7 @@ namespace PurviewAPIExp
                 {
                     userId = account.HomeAccountId.ObjectId;
                     tenantId = account.HomeAccountId.TenantId;
+                    userName.Text = account.Username;
                     this.SetUpApiUrls();
                 }
             }
@@ -233,6 +236,7 @@ namespace PurviewAPIExp
             this.userPsUrl = string.Format(CultureInfo.InvariantCulture, UserPsUrlFormat, this.baseUrl);
             this.pcUrl = string.Format(CultureInfo.InvariantCulture, PcUrlFormat, this.baseUrl);
             this.activityUrl = string.Format(CultureInfo.InvariantCulture, ActivityUploadFormat, this.baseUrl);
+            this.sensitivityLabelsUrl = string.Format(CultureInfo.InvariantCulture, SensitivityLabelsFormat, this.baseUrl);
             this.SetUpApiViews();
         }
 
@@ -298,11 +302,11 @@ namespace PurviewAPIExp
                         $"          \"activity\": \"uploadText\"\r\n" +
                         $"       }},\r\n" +
                         $"       \"deviceMetadata\": {{\r\n" +
-                        $"          \"deviceType\": \"managed\",\r\n" +
                         $"          \"operatingSystemSpecifications\": {{\r\n" +
                         $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
                         $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
-                        $"          }}\r\n" +
+                        $"          }},\r\n" +
+                        $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
                         $"       }},\r\n" +
                         $"       \"protectedAppMetadata\": {{\r\n" +
                         $"          \"name\": \"PC Purview API Explorer\",\r\n" + 
@@ -348,11 +352,11 @@ namespace PurviewAPIExp
                         $"          \"activity\": \"downloadText\"\r\n" +
                         $"       }},\r\n" +
                         $"       \"deviceMetadata\": {{\r\n" +
-                        $"          \"deviceType\": \"managed\",\r\n" +
                         $"          \"operatingSystemSpecifications\": {{\r\n" +
                         $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
                         $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
-                        $"          }}\r\n" +
+                        $"          }},\r\n" +
+                        $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
                         $"       }},\r\n" +
                         $"       \"protectedAppMetadata\": {{\r\n" +
                         $"          \"name\": \"PC Purview API Explorer\",\r\n" +
@@ -397,11 +401,11 @@ namespace PurviewAPIExp
                         $"          \"activity\": \"uploadText\"\r\n" +
                         $"       }},\r\n" +
                         $"       \"deviceMetadata\": {{\r\n" +
-                        $"          \"deviceType\": \"managed\",\r\n" +
                         $"          \"operatingSystemSpecifications\": {{\r\n" +
                         $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
                         $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
-                        $"          }}\r\n" +
+                        $"          }},\r\n" +
+                        $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
                         $"       }},\r\n" +
                         $"       \"protectedAppMetadata\": {{\r\n" +
                         $"          \"name\": \"PC Purview API Explorer\",\r\n" +
@@ -462,11 +466,11 @@ namespace PurviewAPIExp
                         $"          \"activity\": \"downloadText\"\r\n" +
                         $"       }},\r\n" +
                         $"       \"deviceMetadata\": {{\r\n" +
-                        $"          \"deviceType\": \"unmanaged\",\r\n" +
                         $"          \"operatingSystemSpecifications\": {{\r\n" +
                         $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
                         $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
-                        $"          }}\r\n" +
+                        $"          }},\r\n" +
+                        $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
                         $"       }},\r\n" +
                         $"       \"integratedAppMetadata\": {{\r\n" +
                         $"          \"name\": \"CA Purview API Explorer\",\r\n" +
@@ -477,6 +481,25 @@ namespace PurviewAPIExp
                         $"    }}\r\n" +
                         $"}}";
                         break;
+
+                    case "Labels Retrieval":
+                        httpOperation = "GET";
+                        UrlTextBox.Text = this.sensitivityLabelsUrl;
+                        Scope.Text = "SensitivityLabel.Read";
+                        RequestContentTabControl.SelectedIndex = 0;
+                        RequestBodyTextBox.Text = string.Empty;
+                        break;
+
+                    case "Label Retrieval For Given Label Id":
+                        httpOperation = "GET";
+                        UrlTextBox.Text = $"{this.sensitivityLabelsUrl}/{{defa4170-0d19-0005-0005-bc88714345d2}}";
+                        Scope.Text = "SensitivityLabel.Read";
+                        RequestContentTabControl.SelectedIndex = 0;
+                        RequestBodyTextBox.Text = string.Empty;
+                        break;
+
+                        
+
                 }
                 StatusBox.Text = $"{selectedItem.Content} API selected";
             }
@@ -619,6 +642,8 @@ namespace PurviewAPIExp
                             ClearTokenCache.IsEnabled = true;
                             this.SetUpApiViews();
                             SignInBtn.Content = "Sign In";
+                            userName.Text = "Please sign in...";
+                            scopeIdentifier = string.Empty;
                         }
                         catch (MsalException msalex)
                         {
