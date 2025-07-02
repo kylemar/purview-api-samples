@@ -55,5 +55,12 @@ namespace PurviewAPIExp
                 catch { }
             }
         }
+
+        public void ResetLog()
+        {
+            sblog.Clear();
+            fileName = null;
+            Debug.WriteLine("Log has been reset.");
+        }
     }
 }
