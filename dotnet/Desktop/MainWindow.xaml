@@ -10,15 +10,19 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:PurviewAPIExp"
         mc:Ignorable="d"
-        Title="Purview API Explorer" Height="1000" Width="1800">
+        Title="Purview API Explorer" 
+        Height="850" 
+        Width="1500"
+        WindowStartupLocation="CenterScreen"
+        >
     <Grid>
-        <StackPanel Margin="10">
-            <Border BorderBrush="DimGray" BorderThickness="1" Padding="5" Margin="5">
+        <StackPanel Margin="0">
+            <Border BorderBrush="DimGray" BorderThickness="1" Padding="0" Margin="5">
                 <StackPanel>
-                    <Grid Margin="0,0,0,10">
+                    <Grid Margin="10,0,5,0">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="500" />
-                            <ColumnDefinition Width="400" />
+                            <ColumnDefinition Width="550" />
+                            <ColumnDefinition Width="350" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="0,0,5,0">
@@ -29,8 +33,11 @@
                                 <ComboBoxItem Content="Process Content - Continue Conversation with Response"/>
                                 <ComboBoxItem Content="Process Content - Continue Conversation with Prompt"/>
                                 <ComboBoxItem Content="Content Activity"/>
-                                <ComboBoxItem Content="Labels Retrieval"/>
-                                <ComboBoxItem Content="Label Retrieval For Given Label Id"/>
+                                <ComboBoxItem Content="List all Sensitivity Labels"/>
+                                <ComboBoxItem Content="Get Label Details For Given Label Id"/>
+                                <ComboBoxItem Content="Get Rights For Given Label Id for the user"/>
+                                <ComboBoxItem Content="Compute Inheritance"/>
+                                <ComboBoxItem Content="Compute Rights and Inheritance" />
                             </ComboBox>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="0,0,5,0">
@@ -38,21 +45,39 @@
                             <TextBox Name="Scope" FontSize="20" Height="32"/>
                         </StackPanel>
 
-                        <StackPanel Grid.Column="2" Margin="0,20,5,0" Orientation="Horizontal" VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <ComboBox Name="GraphVersionSelectBox" SelectionChanged="GraphVersionSelectBox_SelectionChanged" Margin="10,0,10,0" FontSize="20" Height="35"  Width="100">
-                                    <ComboBoxItem Content="Beta" IsSelected ="True"/>
-                                    <ComboBoxItem Content="1.0" IsEnabled="False"/>
+                        <StackPanel Grid.Column="2" Margin="0,20,5,0" Orientation="Vertical" VerticalAlignment="Center">
+                            <Grid x:Name="SignedOut"  Margin="0,0,0,0" >
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200" />
+                                    <ColumnDefinition Width="200" />
+                                    <ColumnDefinition Width="150" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="35" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Button Grid.Row="0" Grid.Column="0" x:Name="SignInBtn"  Content="Sign In with broker" Click="SignInBtn_Click" Margin="0,0,0,0" Width="200"  FontSize="20"/>
+                                <Button Grid.Row="0" Grid.Column="1" x:Name="SignInBrowserBtn"  Content="Sign In with browser" Click="SignInBrowserBtn_Click" Margin="0,0,0,0" Width="200"  FontSize="20"/>
+                                <Button Grid.Row="0" Grid.Column="2" x:Name="ClearTokenCache"  Content="Clear Tokens" Click="ClearTokenCache_Click" Margin="5,0,5,0" Width="136"  FontSize="20" IsEnabled="True"/>
+                            </Grid>
+                            <Grid x:Name="SignedIn"  Margin="0,0,0,0" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="35" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <ComboBox Grid.Row="0" Grid.Column="0" Name="GraphVersionSelectBox" SelectionChanged="GraphVersionSelectBox_SelectionChanged" Margin="0,0,0,0" FontSize="20" Height="35"  Width="100">
+                                    <ComboBoxItem Content="1.0" IsSelected ="True" IsEnabled="True"/>
+                                    <ComboBoxItem Content="Beta" />
                                 </ComboBox>
-                                <Button x:Name="SignInBtn"  Content="Sign In" Click="SignInBtn_Click" Margin="10,0,10,0" Width="136"  FontSize="20"/>
-                                <Button x:Name="ClearTokenCache"  Content="Clear Tokens" Click="ClearTokenCache_Click" Margin="10,0,10,0" Width="136"  FontSize="20" IsEnabled="True"/>
-                                <StackPanel Orientation="Vertical">
-                                   <CheckBox x:Name="UseBroker" Content="Use Broker" Margin="5,0,5,0" FontSize="20" IsChecked="True" />
-                                </StackPanel>
-                                <TextBlock x:Name="userName"  Text="Please sign in ..." Margin="20,0,0,5" FontSize="20"/>
-                            </StackPanel>
+                                <Button Grid.Row="0" Grid.Column="1" x:Name="SignOut"  Content="Sign Out" Click="SignOut_Click" Margin="0,0,0,0" Width="100"  FontSize="20" IsEnabled="True"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" x:Name="userName" Text="Please sign in ..." Margin="20,0,0,5" FontSize="20" Width="370" HorizontalAlignment="Left"/>
+                            </Grid>
                         </StackPanel>
-
                     </Grid>
                 </StackPanel>
             </Border>
@@ -73,10 +98,11 @@
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <StackPanel Orientation="Vertical">
                             <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Request" Margin="0,0,5,0" FontSize="20"/>
+                                <TextBlock Text="Request" Margin="0,0,5,0" FontSize="20"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                    <Button x:Name="SendBtn"  Content="Send Request" Click="SendRequestButton_Click" Margin="10,0,10,0" Width="236"  FontSize="20" IsEnabled="False"/>
-                                    <Button x:Name="NewRequestBtn"  Content="New Request" Click="NewRequestBtn_Click" Margin="10,0,10,0" Width="236"  FontSize="20" IsEnabled="False"/>
+                                    <Button x:Name="SendBtn"  Content="Send Request" Click="SendRequestButton_Click" Margin="10,0,10,0" Width="200"  FontSize="20" IsEnabled="False"/>
+                                    <Button x:Name="NewRequestBtn"  Content="New Request" Click="NewRequestBtn_Click" Margin="10,0,10,0" Width="200"  FontSize="20" IsEnabled="False"/>
+                                    <Button x:Name="Docs"  Content="Documentation" Click="Docs_Click" Margin="10,0,10,0" Width="200"  FontSize="20" IsEnabled="True"/>
                                 </StackPanel>
                             </StackPanel>
                             <TabControl Name="RequestContentTabControl" Margin="5" FontSize="20" Width="710" Height="570">
@@ -106,7 +132,7 @@
                                 </TabItem>
                                 <TabItem Header="Log" >
                                     <StackPanel>
-                                        <TextBox x:Name="LogTextBox" Height="300" Margin="0,0,0,10" TextWrapping="NoWrap" ScrollViewer.VerticalScrollBarVisibility="Visible"  ScrollViewer.HorizontalScrollBarVisibility="Visible"  FontSize="20"/>
+                                        <TextBox x:Name="LogTextBox" Height="560" Margin="0,0,0,10" TextWrapping="NoWrap" ScrollViewer.VerticalScrollBarVisibility="Visible"  ScrollViewer.HorizontalScrollBarVisibility="Visible"  FontSize="20"/>
                                     </StackPanel>
                                 </TabItem>
                             </TabControl>
@@ -117,7 +143,12 @@
 
                 </StackPanel>
             </Border>
-            <TextBlock x:Name="StatusBox" Text="Status" VerticalAlignment="Bottom" FontSize="20"/>
+            <StackPanel Orientation="Horizontal" Margin="5,0,0,0">
+                <TextBlock Text="Protection Scope State:" Width="210" FontSize="20"/>
+                <TextBlock x:Name="ProtectionScopeStateBox" Text="Not cached!" Width="535" FontSize="20"/>
+                <TextBlock x:Name="StatusBox" Text="Status" Width="600" FontSize="20" Margin="10,0,0,0"/>
+                <Button x:Name="ResetLog" Content="Reset Log" Click="ResetLog_Click" Margin="10,0,10,0" Width="100" FontSize="20"/>
+            </StackPanel>
         </StackPanel>
     </Grid>
 </Window>

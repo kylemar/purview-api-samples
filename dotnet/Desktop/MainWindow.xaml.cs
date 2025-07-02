@@ -6,6 +6,8 @@ namespace PurviewAPIExp
     using Microsoft.Identity.Client;
     using Microsoft.Identity.Client.Broker;
     using Newtonsoft.Json;
+    using Newtonsoft.Json.Linq;
+    using Purview_API_Explorer;
     using System.Globalization;
     using System.Net.Http;
     using System.Net.Http.Headers;
@@ -27,22 +29,22 @@ namespace PurviewAPIExp
         private const string SensitivityLabelsFormat = "{0}/security/dataSecurityAndGovernance/sensitivityLabels";
 
         /// <summary>
-        /// Cache the ProtectionScopes ID
+        /// Cache the ProtectionScopes State
         /// </summary>
-        private string scopeIdentifier = string.Empty;
+        private string protectionScopeState = string.Empty;
+        private bool needToCallProtectionScopes = true;
+
+        /// <summary>
+        /// Timer to check for ProtectionScopeState needed to up re-computed
+        /// </summary>
+        Timer? protectionScopeStateTimer = null;
+        private DateTime protectionScopeStateIdleTime = DateTime.MinValue;
 
         /// <summary>
         /// going to need some random numbers for the data 
         /// </summary>
         private static Random random = new Random();
         private int applicationNumber = random.Next(0, Int32.MaxValue);
-
-        /// <summary>
-        /// Do we need to evaluate inline or offline?
-        /// 
-        /// 
-        /// </summary>
-        private bool isOffline = true;
 
         /// <summary
         /// Simple logger
@@ -66,6 +68,7 @@ namespace PurviewAPIExp
         private string clientId = "83ef198a-0396-4893-9d4f-d36efbffc8bd";
         private string userId = string.Empty;
         private string tenantId = string.Empty;
+        private string userEmail = string.Empty;
 
         /// <summary>
         /// Windows OS values
@@ -80,19 +83,30 @@ namespace PurviewAPIExp
         private string pcUrl = string.Empty;
         private string activityUrl = string.Empty;
         private string sensitivityLabelsUrl = string.Empty;
-        private string baseUrl = "https://graph.microsoft.com/beta";
+        private string baseUrl = "https://graph.microsoft.com/v1.0";
 
         /// <summary>
         /// Microsoft Authentication Library Public Client
         /// Used to sign in the user and acquire access tokens to call Purview API
         /// </summary>
         private static IPublicClientApplication? MSALPublicClientApp;
+        private bool useBroker = true;
 
         /// <summary>
         /// All the permissions the app needs. Listed together for a single consent prompt on first sign in
         /// as opposed incrementally adding consent with multiple prompts as the user explores APIs
         /// </summary>
-        private string[] signInScopes = new string[] { "user.read", "Content.Process.User", "ProtectionScopes.Compute.User", "ContentActivity.Write", "SensitivityLabel.Read" };
+        private string[] signInScopes = new string[] { "user.read", "Content.Process.User", "ProtectionScopes.Compute.User", "ContentActivity.Write", "SensitivityLabel.Read", "SensitivityLabel.Evaluate" };
+
+        /// <summary>   
+        /// Current API Doc page URL
+        /// </summary>
+        private string currentApiDocUrl = "https://learn.microsoft.com/en-us/purview/developer/?branch=main";
+
+        /// <summary
+        /// Wait for the next API call to return before proceding?
+        /// </summary>
+        private bool waitForApiCall = true;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MainWindow"/> class.
@@ -115,6 +129,8 @@ namespace PurviewAPIExp
             {
                 WindowsMarketingName = "Windows 10";
             }
+
+            protectionScopeStateTimer = new Timer(ProtectionScopeStateTimerCallback, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
         }
 
         private async Task SignInUser()
@@ -124,7 +140,7 @@ namespace PurviewAPIExp
                 // Use Continous Access Evaluation (CAE)
                 .WithClientCapabilities(new[] { "cp1" });
 
-            if (UseBroker.IsChecked == true)
+            if (useBroker == true)
             {
                 // This sample uses the auth broker by default. 
                 //
@@ -155,6 +171,7 @@ namespace PurviewAPIExp
                 {
                     userId = account.HomeAccountId.ObjectId;
                     tenantId = account.HomeAccountId.TenantId;
+                    userEmail = account.Username;
                     userName.Text = account.Username;
                     this.SetUpApiUrls();
                 }
@@ -168,63 +185,18 @@ namespace PurviewAPIExp
             }
         }
 
-        private async Task<Dictionary<string, string>> GetResponseStringAsync(HttpResponseMessage response)
-        {
-            string prettyJson = "";
-            ComboBoxItem selectedItem = (ComboBoxItem)ApiSelectBox.SelectedItem;
-            string? API = selectedItem.Content.ToString();
-
-            Dictionary<string, string> responseDict = new Dictionary<string, string>(3, StringComparer.OrdinalIgnoreCase);
-
-            string responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
-
-            if (responseContent != null)
-            {
-                try
-                {
-                    dynamic? parsedJson = JsonConvert.DeserializeObject<dynamic>(responseContent);
-                    if (parsedJson != null) 
-                    {
-                        prettyJson = JsonConvert.SerializeObject(parsedJson, Newtonsoft.Json.Formatting.Indented);
-                    }
-                }
-                catch (JsonReaderException ex)
-                {
-                    prettyJson = responseContent;
-                    logger.Log("Error parsing JSON: " + ex.Message);
-                }
-            }
-
-            if (selectedItem != null && selectedItem.Content != null)
-            {
-                responseDict["StatusCode"] = $"StatusCode: {(int)response.StatusCode} - {response.ReasonPhrase}";
-                if (API != null && API.StartsWith("Protection Scopes"))
-                {
-                    isOffline = true;
-                    if (responseContent != null && responseContent.Contains("evaluateInline"))
-                    {
-                        isOffline = false;
-                    }
-                }
-            }
-
-            if (response.Headers.ETag != null)
-            {
-                scopeIdentifier = response.Headers.ETag.ToString();
-            }
-            responseDict["Headers"] = $"{response.Headers}";
-            responseDict["Content"] = $"{prettyJson}";
-
-            return responseDict;
-        }
-
         private void ApiSelectBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if ( userId == string.Empty)
+            if (userId == string.Empty)
             {
                 return;
             }
-            this.SetUpApiViews();
+
+            int newIndex = SetUpApiViews();
+            if (newIndex != -1)
+            {
+                ApiSelectBox.SelectedItem = ApiSelectBox.Items[newIndex];
+            }
         }
 
         private void SetUpApiUrls()
@@ -247,13 +219,13 @@ namespace PurviewAPIExp
         private string conversationId = string.Empty;
         private int conversationSequence = 0;
 
-        private void SetUpApiViews()
+        private int SetUpApiViews()
         {
             if (userId == string.Empty)
             {
                 UrlTextBox.Text = string.Empty;
                 Scope.Text = string.Empty;
-                return;
+                return 0;
             }
 
             if (this.isInitialized && ApiSelectBox.SelectedItem is ComboBoxItem selectedItem)
@@ -264,170 +236,254 @@ namespace PurviewAPIExp
                 headers.AppendLine("User-Agent:Purview API Explorer");
                 headers.AppendLine($"client-request-id:{Guid.NewGuid().ToString()}");
                 headers.AppendLine($"x-ms-client-request-id:{Guid.NewGuid().ToString()}");
-                if (scopeIdentifier != null && scopeIdentifier != string.Empty)
-                {
-                    headers.AppendLine($"If-None-Match:{scopeIdentifier}");
-                }
-                RequestHeadersTextBox.Text = headers.ToString();
 
                 switch (selectedItem.Content.ToString())
                 {
                     case "Process Content - Start Conversation":
-                        httpOperation = "POST";
-                        UrlTextBox.Text = this.pcUrl;
-                        Scope.Text = "Content.Process.User";
-                        RequestContentTabControl.SelectedIndex = 0;
-                        conversationId = Guid.NewGuid().ToString();
-                        conversationSequence = 0;
-                        RequestBodyTextBox.Text =
-                        $"{{\r\n" +
-                        $"    \"contentToProcess\": {{\r\n" +
-                        $"       \"contentEntries\": [\r\n" +
-                        $"          {{\r\n" +
-                        $"             \"@odata.type\": \"microsoft.graph.processConversationMetadata\",\r\n" +
-                        $"             \"identifier\": \"{Guid.NewGuid()}\",\r\n" +
-                        $"             \"content\": {{\r\n" +
-                        $"                \"@odata.type\": \"microsoft.graph.textContent\", \r\n" +
-                        $"                \"data\": \"For application {++applicationNumber}, Write an acceptance letter for Alex Wilber with Credit card number 4532667785213500, ssn: 120-98-1437 at One Microsoft Way, Redmond, WA 98052\"\r\n" +
-                        $"             }},\r\n" +
-                        $"             \"name\":\"PC Purview API Explorer message\",\r\n" +
-                        $"             \"correlationId\": \"{conversationId}\",\r\n" +
-                        $"             \"sequenceNumber\": {conversationSequence++}, \r\n" +
-                        $"             \"isTruncated\": false,\r\n" +
-                        $"             \"createdDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\",\r\n" +
-                        $"             \"modifiedDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\"\r\n" +
-                        $"          }}\r\n" +
-                        $"       ],\r\n" +
-                        $"       \"activityMetadata\": {{ \r\n" +
-                        $"          \"activity\": \"uploadText\"\r\n" +
-                        $"       }},\r\n" +
-                        $"       \"deviceMetadata\": {{\r\n" +
-                        $"          \"operatingSystemSpecifications\": {{\r\n" +
-                        $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
-                        $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
-                        $"          }},\r\n" +
-                        $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
-                        $"       }},\r\n" +
-                        $"       \"protectedAppMetadata\": {{\r\n" +
-                        $"          \"name\": \"PC Purview API Explorer\",\r\n" + 
-                        $"          \"version\": \"0.2\",\r\n" + 
-                        $"          \"applicationLocation\":{{\r\n" + 
-                        $"             \"@odata.type\": \"microsoft.graph.policyLocationApplication\",\r\n" + 
-                        $"             \"value\": \"{clientId}\"\r\n" + 
-                        $"          }}\r\n" +
-                        $"       }},\r\n" + 
-                        $"       \"integratedAppMetadata\": {{\r\n" +
-                        $"          \"name\": \"PC Purview API Explorer\",\r\n" +
-                        $"          \"version\": \"0.1\" \r\n" +
-                        $"       }}\r\n" +
-                        $"    }}\r\n" +
-                        $"}}";
+                        if (CheckForProtectionScopeState(headers) == false)
+                        {
+                            return 0;
+                        }
+
+                        if (ProtectionScopeStateCache.Prompts == CallPurviewType.Dont)
+                        {
+                            var popup = new MessagePopup("The tenant is not configured for your app to call ProcessContent for Prompts. You should offer the options to call Content Activities for prompts.", "Do not call Process Content for prompts");
+                            popup.Owner = this; // Set owner for modal behavior
+                            popup.ShowDialog();
+                            return 4;
+                        }
+                        else
+                        {
+                            currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/userdatasecurityandgovernance-processcontent";
+                            httpOperation = "POST";
+                            UrlTextBox.Text = this.pcUrl;
+                            Scope.Text = "Content.Process.User";
+                            RequestContentTabControl.SelectedIndex = 0;
+                            conversationId = Guid.NewGuid().ToString();
+                            conversationSequence = 0;
+                            if (ProtectionScopeStateCache.Prompts == CallPurviewType.Inline)
+                            {
+                                waitForApiCall = true;
+                            }
+                            else
+                            {
+                                waitForApiCall = false;
+                            }
+                            RequestBodyTextBox.Text =
+                            $"{{\r\n" +
+                            $"    \"contentToProcess\": {{\r\n" +
+                            $"       \"contentEntries\": [\r\n" +
+                            $"          {{\r\n" +
+                            $"             \"@odata.type\": \"microsoft.graph.processConversationMetadata\",\r\n" +
+                            $"             \"identifier\": \"{Guid.NewGuid()}\",\r\n" +
+                            $"             \"content\": {{\r\n" +
+                            $"                \"@odata.type\": \"microsoft.graph.textContent\", \r\n" +
+                            $"                \"data\": \"For application {++applicationNumber}, Write an acceptance letter for Alex Wilber with Credit card number 4532667785213500, ssn: 120-98-1437 at One Microsoft Way, Redmond, WA 98052\"\r\n" +
+                            $"             }},\r\n" +
+                            $"             \"name\":\"PC Purview API Explorer message\",\r\n" +
+                            $"             \"correlationId\": \"{conversationId}\",\r\n" +
+                            $"             \"sequenceNumber\": {conversationSequence++}, \r\n" +
+                            $"             \"isTruncated\": false,\r\n" +
+                            $"             \"createdDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\",\r\n" +
+                            $"             \"modifiedDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\"\r\n" +
+                            $"          }}\r\n" +
+                            $"       ],\r\n" +
+                            $"       \"activityMetadata\": {{ \r\n" +
+                            $"          \"activity\": \"uploadText\"\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"deviceMetadata\": {{\r\n" +
+                            $"          \"operatingSystemSpecifications\": {{\r\n" +
+                            $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
+                            $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
+                            $"          }},\r\n" +
+                            $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"protectedAppMetadata\": {{\r\n" +
+                            $"          \"name\": \"PC Purview API Explorer\",\r\n" +
+                            $"          \"version\": \"0.2\",\r\n" +
+                            $"          \"applicationLocation\":{{\r\n" +
+                            $"             \"@odata.type\": \"microsoft.graph.policyLocationApplication\",\r\n" +
+                            $"             \"value\": \"{clientId}\"\r\n" +
+                            $"          }}\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"integratedAppMetadata\": {{\r\n" +
+                            $"          \"name\": \"PC Purview API Explorer\",\r\n" +
+                            $"          \"version\": \"0.1\" \r\n" +
+                            $"       }}\r\n" +
+                            $"    }}\r\n" +
+                            $"}}";
+                        }
                         break;
 
                     case "Process Content - Continue Conversation with Response":
-                        httpOperation = "POST";
-                        UrlTextBox.Text = this.pcUrl;
-                        Scope.Text = "Content.Process.User";
-                        RequestContentTabControl.SelectedIndex = 0;
-                        RequestBodyTextBox.Text =
-                        $"{{\r\n" +
-                        $"    \"contentToProcess\": {{\r\n" +
-                        $"       \"contentEntries\": [\r\n" +
-                        $"          {{\r\n" +
-                        $"             \"@odata.type\": \"microsoft.graph.processConversationMetadata\",\r\n" +
-                        $"             \"identifier\": \"{Guid.NewGuid()}\",\r\n" +
-                        $"             \"content\": {{\r\n" +
-                        $"                \"@odata.type\": \"microsoft.graph.textContent\", \r\n" +
-                        $"                \"data\": \"Dear Alex, your application {applicationNumber} is accepted. Your payments will be automatically deducted from your credit card 4532667785213500 and statements mailed to Alex Wilber One Microsoft Way, Redmond, WA 98052. For tax purposes this transaction will be reported with your Social Security number -  120-98-1437\"\r\n" +
-                        $"             }},\r\n" +
-                        $"             \"name\":\"PC Purview API Explorer message\",\r\n" +
-                        $"             \"correlationId\": \"{conversationId}\",\r\n" +
-                        $"             \"sequenceNumber\": {conversationSequence++}, \r\n" +
-                        $"             \"isTruncated\": false,\r\n" +
-                        $"             \"createdDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\",\r\n" +
-                        $"             \"modifiedDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\"\r\n" +
-                        $"          }}\r\n" +
-                        $"       ],\r\n" +
-                        $"       \"activityMetadata\": {{ \r\n" +
-                        $"          \"activity\": \"downloadText\"\r\n" +
-                        $"       }},\r\n" +
-                        $"       \"deviceMetadata\": {{\r\n" +
-                        $"          \"operatingSystemSpecifications\": {{\r\n" +
-                        $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
-                        $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
-                        $"          }},\r\n" +
-                        $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
-                        $"       }},\r\n" +
-                        $"       \"protectedAppMetadata\": {{\r\n" +
-                        $"          \"name\": \"PC Purview API Explorer\",\r\n" +
-                        $"          \"version\": \"0.2\",\r\n" +
-                        $"          \"applicationLocation\":{{\r\n" +
-                        $"             \"@odata.type\": \"microsoft.graph.policyLocationApplication\",\r\n" +
-                        $"             \"value\": \"{clientId}\"\r\n" +
-                        $"          }}\r\n" +
-                        $"       }},\r\n" +
-                        $"       \"integratedAppMetadata\": {{\r\n" +
-                        $"          \"name\": \"PC Purview API Explorer\",\r\n" +
-                        $"          \"version\": \"0.1\" \r\n" +
-                        $"       }}\r\n" +
-                        $"    }}\r\n" +
-                        $"}}"; break;
+                        if (CheckForProtectionScopeState(headers) == false)
+                        {
+                            return 0;
+                        }
+                        if (ProtectionScopeStateCache.Responses == CallPurviewType.Dont)
+                        {
+                            var popup = new MessagePopup("The tenant is not configured for your app to call ProcessContent for Responses. You should offer the options to call Content Activities for Responses.", "Do not call Process Content for Responses");
+                            popup.Owner = this; // Set owner for modal behavior
+                            popup.ShowDialog();
+                            return 4;
+                        }
+                        else
+                        {
+                            currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/userdatasecurityandgovernance-processcontent";
+                            httpOperation = "POST";
+                            UrlTextBox.Text = this.pcUrl;
+                            Scope.Text = "Content.Process.User";
+                            if (conversationId == string.Empty)
+                            {
+                                conversationId = Guid.NewGuid().ToString();
+                                conversationSequence = 0;
+                            }
+                            RequestContentTabControl.SelectedIndex = 0;
+                            if (ProtectionScopeStateCache.Responses == CallPurviewType.Inline)
+                            {
+                                waitForApiCall = true;
+                            }
+                            else
+                            {
+                                waitForApiCall = false;
+                            }
+                            RequestBodyTextBox.Text =
+                            $"{{\r\n" +
+                            $"    \"contentToProcess\": {{\r\n" +
+                            $"       \"contentEntries\": [\r\n" +
+                            $"          {{\r\n" +
+                            $"             \"@odata.type\": \"microsoft.graph.processConversationMetadata\",\r\n" +
+                            $"             \"identifier\": \"{Guid.NewGuid()}\",\r\n" +
+                            $"             \"content\": {{\r\n" +
+                            $"                \"@odata.type\": \"microsoft.graph.textContent\", \r\n" +
+                            $"                \"data\": \"Dear Alex, your application {applicationNumber} is accepted. Your payments will be automatically deducted from your credit card 4532667785213500 and statements mailed to Alex Wilber One Microsoft Way, Redmond, WA 98052. For tax purposes this transaction will be reported with your Social Security number -  120-98-1437\"\r\n" +
+                            $"             }},\r\n" +
+                            $"             \"name\":\"PC Purview API Explorer message\",\r\n" +
+                            $"             \"correlationId\": \"{conversationId}\",\r\n" +
+                            $"             \"sequenceNumber\": {conversationSequence++}, \r\n" +
+                            $"             \"isTruncated\": false,\r\n" +
+                            $"             \"createdDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\",\r\n" +
+                            $"             \"modifiedDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\"\r\n" +
+                            $"          }}\r\n" +
+                            $"       ],\r\n" +
+                            $"       \"activityMetadata\": {{ \r\n" +
+                            $"          \"activity\": \"downloadText\"\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"deviceMetadata\": {{\r\n" +
+                            $"          \"operatingSystemSpecifications\": {{\r\n" +
+                            $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
+                            $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
+                            $"          }},\r\n" +
+                            $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"protectedAppMetadata\": {{\r\n" +
+                            $"          \"name\": \"PC Purview API Explorer\",\r\n" +
+                            $"          \"version\": \"0.2\",\r\n" +
+                            $"          \"applicationLocation\":{{\r\n" +
+                            $"             \"@odata.type\": \"microsoft.graph.policyLocationApplication\",\r\n" +
+                            $"             \"value\": \"{clientId}\"\r\n" +
+                            $"          }}\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"integratedAppMetadata\": {{\r\n" +
+                            $"          \"name\": \"PC Purview API Explorer\",\r\n" +
+                            $"          \"version\": \"0.1\" \r\n" +
+                            $"       }}\r\n" +
+                            $"    }}\r\n" +
+                            $"}}";
+                        }
+                        break;
 
                     case "Process Content - Continue Conversation with Prompt":
-                        httpOperation = "POST";
-                        UrlTextBox.Text = this.pcUrl;
-                        Scope.Text = "Content.Process.User";
-                        RequestContentTabControl.SelectedIndex = 0;
-                        RequestBodyTextBox.Text =
-                        $"{{\r\n" +
-                        $"    \"contentToProcess\": {{\r\n" +
-                        $"       \"contentEntries\": [\r\n" +
-                        $"          {{\r\n" +
-                        $"             \"@odata.type\": \"microsoft.graph.processConversationMetadata\",\r\n" +
-                        $"             \"identifier\": \"{Guid.NewGuid()}\",\r\n" +
-                        $"             \"content\": {{\r\n" +
-                        $"                \"@odata.type\": \"microsoft.graph.textContent\", \r\n" +
-                        $"                \"data\": \"How many applications have been accepted today?\"\r\n" +
-                        $"             }},\r\n" +
-                        $"             \"name\":\"PC Purview API Explorer message\",\r\n" +
-                        $"             \"correlationId\": \"{conversationId}\",\r\n" +
-                        $"             \"sequenceNumber\": {conversationSequence++}, \r\n" +
-                        $"             \"isTruncated\": false,\r\n" +
-                        $"             \"createdDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\",\r\n" +
-                        $"             \"modifiedDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\"\r\n" +
-                        $"          }}\r\n" +
-                        $"       ],\r\n" +
-                        $"       \"activityMetadata\": {{ \r\n" +
-                        $"          \"activity\": \"uploadText\"\r\n" +
-                        $"       }},\r\n" +
-                        $"       \"deviceMetadata\": {{\r\n" +
-                        $"          \"operatingSystemSpecifications\": {{\r\n" +
-                        $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
-                        $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
-                        $"          }},\r\n" +
-                        $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
-                        $"       }},\r\n" +
-                        $"       \"protectedAppMetadata\": {{\r\n" +
-                        $"          \"name\": \"PC Purview API Explorer\",\r\n" +
-                        $"          \"version\": \"0.2\",\r\n" +
-                        $"          \"applicationLocation\":{{\r\n" +
-                        $"             \"@odata.type\": \"microsoft.graph.policyLocationApplication\",\r\n" +
-                        $"             \"value\": \"{clientId}\"\r\n" +
-                        $"          }}\r\n" +
-                        $"       }},\r\n" +
-                        $"       \"integratedAppMetadata\": {{\r\n" +
-                        $"          \"name\": \"PC Purview API Explorer\",\r\n" +
-                        $"          \"version\": \"0.1\" \r\n" +
-                        $"       }}\r\n" +
-                        $"    }}\r\n" +
-                        $"}}";
+                        if (CheckForProtectionScopeState(headers) == false)
+                        {
+                            return 0;
+                        }
+                        if (ProtectionScopeStateCache.Prompts == CallPurviewType.Dont)
+                        {
+                            var popup = new MessagePopup("The tenant is not configured for your app to call ProcessContent for Prompts. You should offer the options to call Content Activities for prompts.", "Do not call Process Content for prompts");
+                            popup.Owner = this; // Set owner for modal behavior
+                            popup.ShowDialog();
+                            return 4;
+                        }
+                        else
+                        {
+                            currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/userdatasecurityandgovernance-processcontent";
+                            httpOperation = "POST";
+                            UrlTextBox.Text = this.pcUrl;
+                            Scope.Text = "Content.Process.User";
+                            if (conversationId == string.Empty)
+                            {
+                                conversationId = Guid.NewGuid().ToString();
+                                conversationSequence = 0;
+                            }
+                            RequestContentTabControl.SelectedIndex = 0;
+                            if (ProtectionScopeStateCache.Prompts == CallPurviewType.Inline)
+                            {
+                                waitForApiCall = true;
+                            }
+                            else
+                            {
+                                waitForApiCall = false;
+                            }
+                            RequestBodyTextBox.Text =
+                            $"{{\r\n" +
+                            $"    \"contentToProcess\": {{\r\n" +
+                            $"       \"contentEntries\": [\r\n" +
+                            $"          {{\r\n" +
+                            $"             \"@odata.type\": \"microsoft.graph.processConversationMetadata\",\r\n" +
+                            $"             \"identifier\": \"{Guid.NewGuid()}\",\r\n" +
+                            $"             \"content\": {{\r\n" +
+                            $"                \"@odata.type\": \"microsoft.graph.textContent\", \r\n" +
+                            $"                \"data\": \"How many applications have been accepted today?\"\r\n" +
+                            $"             }},\r\n" +
+                            $"             \"name\":\"PC Purview API Explorer message\",\r\n" +
+                            $"             \"correlationId\": \"{conversationId}\",\r\n" +
+                            $"             \"sequenceNumber\": {conversationSequence++}, \r\n" +
+                            $"             \"isTruncated\": false,\r\n" +
+                            $"             \"createdDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\",\r\n" +
+                            $"             \"modifiedDateTime\": \"{DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss")}\"\r\n" +
+                            $"          }}\r\n" +
+                            $"       ],\r\n" +
+                            $"       \"activityMetadata\": {{ \r\n" +
+                            $"          \"activity\": \"uploadText\"\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"deviceMetadata\": {{\r\n" +
+                            $"          \"operatingSystemSpecifications\": {{\r\n" +
+                            $"             \"operatingSystemPlatform\": \"{WindowsMarketingName}\",\r\n" +
+                            $"             \"operatingSystemVersion\": \"{WindowsVersion}\" \r\n" +
+                            $"          }},\r\n" +
+                            $"          \"ipAddress\": \"127.0.0.1\"\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"protectedAppMetadata\": {{\r\n" +
+                            $"          \"name\": \"PC Purview API Explorer\",\r\n" +
+                            $"          \"version\": \"0.2\",\r\n" +
+                            $"          \"applicationLocation\":{{\r\n" +
+                            $"             \"@odata.type\": \"microsoft.graph.policyLocationApplication\",\r\n" +
+                            $"             \"value\": \"{clientId}\"\r\n" +
+                            $"          }}\r\n" +
+                            $"       }},\r\n" +
+                            $"       \"integratedAppMetadata\": {{\r\n" +
+                            $"          \"name\": \"PC Purview API Explorer\",\r\n" +
+                            $"          \"version\": \"0.1\" \r\n" +
+                            $"       }}\r\n" +
+                            $"    }}\r\n" +
+                            $"}}";
+                        }
                         break;
 
                     case "Protection Scopes - Initial Call":
+                        if (DateTime.Now < protectionScopeStateIdleTime.AddMinutes(30))
+                        {
+                            var popup = new ProtectionScopeInfo(ProtectionScopeMessageType.TooSoon);
+                            popup.Owner = this; // Set owner for modal behavior
+                            popup.ShowDialog();
+                        }
+                        currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/userprotectionscopecontainer-compute";
                         httpOperation = "POST";
                         UrlTextBox.Text = this.userPsUrl;
                         Scope.Text = "ProtectionScopes.Compute.User";
                         RequestContentTabControl.SelectedIndex = 0;
+                        waitForApiCall = true;
                         RequestBodyTextBox.Text =
                         "{\r\n" +
                         "   \"activities\": \"uploadText,downloadText\",\r\n" +
@@ -442,11 +498,13 @@ namespace PurviewAPIExp
 
                     case "Content Activity":
                         httpOperation = "POST";
+                        currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/activitiescontainer-post-contentactivities";
                         UrlTextBox.Text = this.activityUrl;
                         Scope.Text = "ContentActivity.Write";
                         conversationId = Guid.NewGuid().ToString();
                         conversationSequence = 0;
                         RequestContentTabControl.SelectedIndex = 0;
+                        waitForApiCall = false;
                         RequestBodyTextBox.Text =
                         $"{{\r\n" +
                         $"    \"contentMetadata\": {{\r\n" +
@@ -475,33 +533,106 @@ namespace PurviewAPIExp
                         $"       \"integratedAppMetadata\": {{\r\n" +
                         $"          \"name\": \"CA Purview API Explorer\",\r\n" +
                         $"          \"version\": \"0.1\" \r\n" +
-                        $"       }},\r\n" +
-                        $"       \"userId\":\"{userId}\",\r\n" +
-                        $"       \"scopeIdentifier\":\"0\"\r\n" +
+                        $"       }}\r\n" +
                         $"    }}\r\n" +
                         $"}}";
                         break;
 
-                    case "Labels Retrieval":
+                    case "List all Sensitivity Labels":
+                        currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/tenantdatasecurityandgovernance-list-sensitivitylabels";
                         httpOperation = "GET";
                         UrlTextBox.Text = this.sensitivityLabelsUrl;
                         Scope.Text = "SensitivityLabel.Read";
                         RequestContentTabControl.SelectedIndex = 0;
+                        waitForApiCall = true;
                         RequestBodyTextBox.Text = string.Empty;
                         break;
 
-                    case "Label Retrieval For Given Label Id":
+                    case "Get Label Details For Given Label Id":
+                        currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/sensitivitylabel-get";
                         httpOperation = "GET";
-                        UrlTextBox.Text = $"{this.sensitivityLabelsUrl}/{{defa4170-0d19-0005-0005-bc88714345d2}}";
+                        UrlTextBox.Text = $"{this.sensitivityLabelsUrl}/defa4170-0d19-0005-0009-bc88714345d2";
+                        Scope.Text = "SensitivityLabel.Read";
+                        RequestContentTabControl.SelectedIndex = 0;
+                        waitForApiCall = true;
+                        RequestBodyTextBox.Text = string.Empty;
+                        break;
+
+                    case "Get Rights For Given Label Id for the user":
+                        httpOperation = "GET";
+                        currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/usagerightsincluded-get";
+                        UrlTextBox.Text = $"{this.sensitivityLabelsUrl}/defa4170-0d19-0005-0009-bc88714345d2/rights";
                         Scope.Text = "SensitivityLabel.Read";
                         RequestContentTabControl.SelectedIndex = 0;
                         RequestBodyTextBox.Text = string.Empty;
+                        waitForApiCall = true;
                         break;
 
-                        
+                    case "Compute Inheritance":
+                        currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/sensitivitylabel-computeinheritance";
+                        httpOperation = "GET";
+                        UrlTextBox.Text = $"{this.sensitivityLabelsUrl}/computeInheritance(labelIds=[\"defa4170-0d19-0005-0007-bc88714345d2\",\"defa4170-0d19-0005-0001-bc88714345d2\",\"defa4170-0d19-0005-000a-bc88714345d2\"],locale='en-US',contentFormats=[\"File\"])";
+                        Scope.Text = "SensitivityLabel.Evaluate";
+                        RequestContentTabControl.SelectedIndex = 0;
+                        RequestBodyTextBox.Text = string.Empty;
+                        waitForApiCall = true;
+                        break;
+
+                    case "Compute Rights and Inheritance":
+                        currentApiDocUrl = "https://learn.microsoft.com/en-us/graph/api/sensitivitylabel-computerightsandinheritance";
+                        httpOperation = "POST";
+                        UrlTextBox.Text = $"{this.sensitivityLabelsUrl}/computeRightsAndInheritance";
+                        Scope.Text = "SensitivityLabel.Evaluate";
+                        RequestContentTabControl.SelectedIndex = 0;
+                        waitForApiCall = true;
+                        RequestBodyTextBox.Text =
+                        $"{{\r\n" +
+                        $"   \"delegatedUserEmail\": \"{userEmail}\",\r\n" +
+                        $"   \"locale\": \"en-us\",\r\n" +
+                        $"   \"protectedContents\": [\r\n" +
+                        $"      {{\r\n" +
+                        $"         \"LabelId\": \"defa4170-0d19-0005-0007-bc88714345d2\",\r\n" +
+                        $"         \"contentFormat\": \"File\",\r\n" +
+                        $"         \"contentId\": \"doc-234\"\r\n" +
+                        $"      }},\r\n" +
+                        $"      {{\r\n" +
+                        $"         \"LabelId\": \"defa4170-0d19-0005-0001-bc88714345d2\",\r\n" +
+                        $"         \"contentFormat\": \"File\",\r\n" +
+                        $"         \"contentId\": \"doc-345\"\r\n" +
+                        $"      }},\r\n" +
+                        $"      {{\r\n" +
+                        $"         \"LabelId\": \"defa4170-0d19-0005-000a-bc88714345d2\",\r\n" +
+                        $"         \"contentFormat\": \"File\",\r\n" +
+                        $"         \"contentId\": \"doc-456\"\r\n" +
+                        $"      }}\r\n" +
+                        $"   ],\r\n" +
+                        $"   \"supportedContentFormats\": [\r\n" +
+                        $"      \"File\"\r\n" +
+                        $"   ]\r\n" +
+                        $"}}";
+                break;
 
                 }
                 StatusBox.Text = $"{selectedItem.Content} API selected";
+                return -1;
+            }
+            return 0;
+        }
+
+        private bool CheckForProtectionScopeState(StringBuilder headers)
+        {
+            if (needToCallProtectionScopes == false)
+            {
+                headers.AppendLine($"If-None-Match:{protectionScopeState}");
+                RequestHeadersTextBox.Text = headers.ToString();
+                return true;
+            }
+            else
+            {
+                var popup = new ProtectionScopeInfo(ProtectionScopeMessageType.NoState);
+                popup.Owner = this; // Set owner for modal behavior
+                popup.ShowDialog();
+                return false;
             }
         }
 
@@ -518,7 +649,7 @@ namespace PurviewAPIExp
             try
             {
                 StatusBox.Text = "Sending request...";
-                response = await this.SendHttpRequest().ConfigureAwait(true);
+                response = await this.SendHttpRequest(waitForApiCall).ConfigureAwait(true);
                 ResponseTextBox.Text = response["Content"];
                 ResponseHeadersTextBox.Text = response["StatusCode"] + "\n" + response["Headers"];
                 logger.Log($"Response StatusCode: {response["StatusCode"]}");
@@ -538,7 +669,7 @@ namespace PurviewAPIExp
             LogTextBox.ScrollToEnd();
         }
 
-        private async Task<Dictionary<string, string>> SendHttpRequest()
+        private async Task<Dictionary<string, string>> SendHttpRequest(bool waitForResponse)
         {
             using (HttpClient client = new HttpClient())
             {
@@ -583,12 +714,126 @@ namespace PurviewAPIExp
 
                 httpRequestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
                 
-                StatusBox.Text = $"Sending {httpRequestMessage.Method} request to {httpRequestMessage.RequestUri?.ToString()}...";
-                HttpResponseMessage httpResponse = await client.SendAsync(httpRequestMessage).ConfigureAwait(true);
-                StatusBox.Text = "Reading response...";
-                return await this.GetResponseStringAsync(httpResponse).ConfigureAwait(true);
+                StatusBox.Text = $"Sending {httpRequestMessage.Method} request ...";
+
+                if (waitForResponse)
+                {
+                    // Wait for the response
+                    HttpResponseMessage httpResponse = await client.SendAsync(httpRequestMessage).ConfigureAwait(true);
+                    StatusBox.Text = "Reading response...";
+                    return await this.GetResponseStringAsync(httpResponse).ConfigureAwait(true);
+                }
+                else
+                {
+                    _ = client.SendAsync(httpRequestMessage).ConfigureAwait(false);
+                    StatusBox.Text = "Not waiting for a response...";
+
+                    Dictionary<string, string> responseDict = new Dictionary<string, string>(3, StringComparer.OrdinalIgnoreCase);
+
+                    responseDict["StatusCode"] = "Not waiting for a response.";
+                    responseDict["Headers"] = "Not waiting for a response.";
+                    responseDict["Content"] = "Not waiting for a response.";
+
+                    return responseDict;
+                }
             }
         }
+
+        private async Task<Dictionary<string, string>> GetResponseStringAsync(HttpResponseMessage response)
+        {
+            dynamic? parsedJson = null;
+            string prettyJson = "";
+            ComboBoxItem selectedItem = (ComboBoxItem)ApiSelectBox.SelectedItem;
+            string? API = selectedItem.Content.ToString();
+
+            Dictionary<string, string> responseDict = new Dictionary<string, string>(3, StringComparer.OrdinalIgnoreCase);
+
+            string responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+            if (responseContent != null)
+            {
+                try
+                {
+                    parsedJson = JsonConvert.DeserializeObject<dynamic>(responseContent);
+                    if (parsedJson != null)
+                    {
+                        prettyJson = JsonConvert.SerializeObject(parsedJson, Newtonsoft.Json.Formatting.Indented);
+                    }
+                }
+                catch (JsonReaderException ex)
+                {
+                    prettyJson = responseContent;
+                    logger.Log("Error parsing JSON: " + ex.Message);
+                }
+            }
+
+            responseDict["StatusCode"] = $"StatusCode: {(int)response.StatusCode} - {response.ReasonPhrase}";
+
+            if (API != null && API.StartsWith("Protection Scopes"))
+            {
+                ProtectionScopeStateCache.ParseProtectionScopeState(parsedJson);
+                ProtectionScopeStateBox.Text = $"Prompts:{ProtectionScopeStateCache.Prompts}  Responses:{ProtectionScopeStateCache.Responses}";
+                needToCallProtectionScopes = false;
+            }
+
+            if (API != null && API.StartsWith("Process Content"))
+            {
+                if (parsedJson != null)
+                {
+                    string protectionScopeStateValue = parsedJson?["protectionScopeState"]?.ToString() ?? string.Empty;
+                    if (!string.IsNullOrEmpty(protectionScopeStateValue))
+                    {
+                        if (protectionScopeStateValue == "modified")
+                        {
+                            protectionScopeState = string.Empty;
+                            ProtectionScopeStateBox.Text = "Not cached! - Modified. Call ProtectionScopes/compute";
+                            needToCallProtectionScopes = true;
+
+                            var popup = new ProtectionScopeInfo(ProtectionScopeMessageType.Modified);
+                            popup.Owner = this; // Set owner for modal behavior
+                            popup.ShowDialog();
+                        }
+                        else
+                        {
+                            protectionScopeStateIdleTime = DateTime.Now;  // Reset idle timer for protection scope state
+                            needToCallProtectionScopes = false;
+                        }
+                    }
+
+                    JArray? policyActions = parsedJson?["policyActions"] as JArray;
+                    if (policyActions != null && policyActions.Count > 0)
+                    {
+                        foreach (var action in policyActions)
+                        {
+                            if (action["@odata.type"]?.ToString() == "#microsoft.graph.restrictAccessAction")
+                            {
+                                string actionType = action["action"]?.ToString() ?? "Unknown";
+                                string restrictionAction = action["restrictionAction"]?.ToString() ?? "No value";
+                                var popup = new MessagePopup($"Your app needs to take steps required for a {restrictionAction} restriction", $"{actionType}");
+                                popup.Owner = this; // Set owner for modal behavior
+                                popup.ShowDialog();
+                            }
+                        }
+                    }
+
+
+                }
+            }
+
+            if (response.Headers.ETag != null)
+            {
+                protectionScopeState = response.Headers.ETag.ToString();
+                protectionScopeStateIdleTime = DateTime.Now;
+                needToCallProtectionScopes = false;
+            }
+
+            responseDict["Headers"] = $"{response.Headers}";
+            responseDict["Content"] = $"{prettyJson}";
+
+            return responseDict;
+        }
+
+
 
         private void GraphVersionSelectBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -613,46 +858,36 @@ namespace PurviewAPIExp
         {
             if (userId == string.Empty)
             {
+                useBroker = true; // Set to true for using WAM broker
                 await SignInUser();
                 if (userId != string.Empty)
                 {
                     SendBtn.IsEnabled = true;
                     NewRequestBtn.IsEnabled = true;
                     ApiSelectBox.IsEnabled = true;
-                    ClearTokenCache.IsEnabled = false;
-                    SignInBtn.Content = "Sign Out";
-                    this.SetUpApiViews();
-                }
-            }
-            else
-            {
-                if (MSALPublicClientApp != null)
-                {
-                    var accounts = await MSALPublicClientApp.GetAccountsAsync();
-                    if (accounts.Any())
-                    {
-                        try
-                        {
-                            await MSALPublicClientApp.RemoveAsync(accounts.FirstOrDefault());
-                            userId = string.Empty;
-                            tenantId = string.Empty;
-                            SendBtn.IsEnabled = false;
-                            NewRequestBtn.IsEnabled = false;
-                            ApiSelectBox.IsEnabled = false;
-                            ClearTokenCache.IsEnabled = true;
-                            this.SetUpApiViews();
-                            SignInBtn.Content = "Sign In";
-                            userName.Text = "Please sign in...";
-                            scopeIdentifier = string.Empty;
-                        }
-                        catch (MsalException msalex)
-                        {
-                            logger.Log("Error Acquiring Token: " + msalex.Message);
-                        }
-                    }
+                    SignedIn.Visibility = Visibility.Visible;
+                    SignedOut.Visibility = Visibility.Collapsed;
+                    SetUpApiViews();
                 }
             }
         }
+
+        private void ProtectionScopeStateTimerCallback(object? state)
+        {
+            if (DateTime.Now >= protectionScopeStateIdleTime.AddMinutes(30))
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    protectionScopeState = string.Empty;
+                    protectionScopeStateIdleTime = DateTime.MinValue;
+                    ProtectionScopeStateBox.Text = "Not cached! - 30 minutes of idle time";
+                    needToCallProtectionScopes = true;
+                    logger.Log("Protection scope state cache cleared after 30 minutes of inactivity.");
+                }));
+            }   
+        }
+
+
 
         private static void AddOrUpdateHeader(HttpRequestMessage request, string headerName, string headerValue)
         {
@@ -680,6 +915,72 @@ namespace PurviewAPIExp
                 }
             }
             TokenCacheHelper.ClearCache();
+        }
+
+        private void Docs_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(currentApiDocUrl))
+            {
+                return;
+            }
+            // Open the documentation link in the default web browser
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(currentApiDocUrl) { UseShellExecute = true });
+        }
+
+        private async void SignOut_Click(object sender, RoutedEventArgs e)
+        {
+            if (MSALPublicClientApp != null)
+            {
+                var accounts = await MSALPublicClientApp.GetAccountsAsync();
+                if (accounts.Any())
+                {
+                    try
+                    {
+                        await MSALPublicClientApp.RemoveAsync(accounts.FirstOrDefault());
+                        userId = string.Empty;
+                        tenantId = string.Empty;
+                        SendBtn.IsEnabled = false;
+                        NewRequestBtn.IsEnabled = false;
+                        ApiSelectBox.IsEnabled = false;
+                        ClearTokenCache.IsEnabled = true;
+                        SetUpApiViews();
+                        SignedIn.Visibility = Visibility.Collapsed;
+                        SignedOut.Visibility = Visibility.Visible;
+                        userName.Text = "Please sign in...";
+                        currentApiDocUrl = "https://learn.microsoft.com/en-us/purview/developer/?branch=main";
+                        protectionScopeState = string.Empty;
+                        ProtectionScopeStateBox.Text = "Not cached!";
+                    }
+                    catch (MsalException msalex)
+                    {
+                        logger.Log("Error Acquiring Token: " + msalex.Message);
+                    }
+                }
+            }
+        }
+
+        private async void SignInBrowserBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (userId == string.Empty)
+            {
+                useBroker = false; // Set to false for using browser sign-in
+                await SignInUser();
+                if (userId != string.Empty)
+                {
+                    SendBtn.IsEnabled = true;
+                    NewRequestBtn.IsEnabled = true;
+                    ApiSelectBox.IsEnabled = true;
+                    SignedIn.Visibility = Visibility.Visible;
+                    SignedOut.Visibility = Visibility.Collapsed;
+                    SetUpApiViews();
+                }
+            }
+        }
+
+        private void ResetLog_Click(object sender, RoutedEventArgs e)
+        {
+            LogTextBox.Text = string.Empty;
+            logger.ResetLog();
         }
     }
 }

@@ -34,7 +34,7 @@ namespace PurviewAPIExp
             }
             else
             {
-                if (UseBroker.IsChecked == true)
+                if (useBroker == true)
                 {
                     firstAccount = PublicClientApplication.OperatingSystemAccount;
                 }
